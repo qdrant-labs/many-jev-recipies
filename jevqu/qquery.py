@@ -2,6 +2,12 @@ from __future__ import annotations
 from qdrant_client import models
 from jevqu.schema import Taxonomy, Understanding
 
+MODES = {"auto", "filter", "boost", "off"}
+
+def _check_mode(mode: str) -> None:
+    if mode not in MODES:
+        raise ValueError(f"unknown mode {mode!r}; must be one of {sorted(MODES)}")
+
 def _sure(u: Understanding, tax: Taxonomy) -> list[str]:
     return [cid for cid, p in u.classes if p >= tax.thresholds.filter_above]
 
@@ -12,6 +18,7 @@ def _boosts(u: Understanding, tax: Taxonomy, mode: str) -> list[tuple[str, str, 
     return [(key, v, p) for key, v, p in cands if t.boost_above <= p < ceiling]
 
 def build_filter(u: Understanding | None, tax: Taxonomy, mode: str) -> models.Filter | None:
+    _check_mode(mode)
     if u is None or mode in ("off", "boost"):
         return None
     must = [models.FieldCondition(key="classes", match=models.MatchValue(value=cid)) for cid in _sure(u, tax)]
@@ -20,6 +27,7 @@ def build_filter(u: Understanding | None, tax: Taxonomy, mode: str) -> models.Fi
     return models.Filter(must=must) if must else None
 
 def build_formula(u: Understanding | None, tax: Taxonomy, mode: str) -> models.FormulaQuery | None:
+    _check_mode(mode)
     if u is None or mode in ("off", "filter"):
         return None
     boosts = _boosts(u, tax, mode)

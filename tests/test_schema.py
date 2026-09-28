@@ -18,3 +18,7 @@ def test_hierarchy_and_roundtrip():
 def test_state_truncates_and_selects_fields():
     s = state_from_payload({"title": "x" * 5000, "price": 3, "junk": "y"}, fields=["title", "price"], max_chars=10)
     assert s == {"title": "xxxxxxxxxx", "price": 3}
+
+def test_state_excludes_exactly_the_labeling_keys():
+    s = state_from_payload({"classification": "x", "classes": ["a"], "class_model": "m", "needs_review": False})
+    assert s == {"classification": "x"}

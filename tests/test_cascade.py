@@ -1,4 +1,5 @@
 import numpy as np
+import pytest
 from jevqu.cascade import Cascade, LocalClassifier, error_independence
 from jevqu.jev import FakeJev
 from jevqu.schema import ClassDef, Taxonomy, Thresholds
@@ -36,3 +37,7 @@ def test_error_independence():
     jevl = [{"a"}, {"a"}, {"a"}, {"a"}]    # wrong on 2, 3
     r = error_independence(gold, local, jevl)
     assert r == {"p_jev_wrong": 0.5, "p_jev_wrong_given_local_wrong": 0.5, "n": 4}
+
+def test_error_independence_rejects_mismatched_lengths():
+    with pytest.raises(ValueError):
+        error_independence([{"a"}, {"a"}], [{"a"}], [{"a"}, {"a"}])

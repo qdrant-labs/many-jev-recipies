@@ -13,6 +13,9 @@ def local_facets(query: str, tax: Taxonomy) -> dict[str, tuple[str, float]]:
                 out[f.field] = (v, 1.0); break
     return out
 
+def _class_q(c) -> dict:
+    return noul(f"Does the query ask for items in the class `{c.name}`?", c.definition, c.exclusions)
+
 def understand(query: str, tax: Taxonomy, jev, stored_model: str | None = None, labeled_ids: set[str] | None = None) -> Understanding:
     if stored_model is not None and stored_model != tax.model:
         raise ValueError(f"labels were written by {stored_model}, taxonomy expects {tax.model}; relabel first")
@@ -21,8 +24,7 @@ def understand(query: str, tax: Taxonomy, jev, stored_model: str | None = None, 
         if not level1_ids <= labeled_ids:
             raise ValueError(f"stored labels predate taxonomy {tax.version}; relabel first")
     facets = local_facets(query, tax)
-    qs = {c.id: noul(f"Does the query ask for items in the class `{c.name}`?", c.definition, c.exclusions)
-          for c in tax.level1()}
+    qs = {c.id: _class_q(c) for c in tax.level1()}
     for f in tax.facets:
         if f.field not in facets:
             opts = {v: None for v in f.values[:250]}
@@ -31,6 +33,11 @@ def understand(query: str, tax: Taxonomy, jev, stored_model: str | None = None, 
     state = state_from_payload({"query": query})
     ans = jev.ask(state, qs)
     classes = [(c.id, ans[c.id]["noul"]) for c in tax.level1()]
+    kids = {k.id: _class_q(k) for c in tax.level1() if ans[c.id]["noul"] >= tax.thresholds.boost_above
+            for k in tax.children(c.id)}
+    if kids:
+        kid_ans = jev.ask(state, kids)
+        classes += [(kid_id, kid_ans[kid_id]["noul"]) for kid_id in kids]
     for f in tax.facets:
         a = ans.get(f"facet_{f.field}")
         if a and a["choice"] != "none" and a["confidence"] >= tax.thresholds.boost_above:

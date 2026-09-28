@@ -1,3 +1,4 @@
+import pytest
 from qdrant_client import QdrantClient, models
 from jevqu.qquery import build_filter, build_formula, run
 from jevqu.schema import ClassDef, Facet, Taxonomy, Thresholds, Understanding
@@ -17,6 +18,12 @@ def test_auto_filters_when_sure_boosts_when_unsure():
 def test_no_signal_means_no_filter_no_formula():
     u = Understanding([("outdoor", 0.2), ("kitchen", 0.1)], {}, "v1")
     assert build_filter(u, TAX, "auto") is None and build_formula(u, TAX, "auto") is None
+
+def test_run_rejects_unknown_mode():
+    c = QdrantClient(":memory:")
+    c.create_collection("p", vectors_config=models.VectorParams(size=2, distance=models.Distance.DOT))
+    with pytest.raises(ValueError):
+        run(c, "p", [1.0, 0.0], None, None, TAX, mode="Off")
 
 def _mem():
     c = QdrantClient(":memory:")

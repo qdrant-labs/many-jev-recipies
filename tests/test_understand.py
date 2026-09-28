@@ -41,6 +41,24 @@ def test_labels_from_an_older_taxonomy_refused():
     u = understand("x", TAX, FakeJev(), stored_model="jev-1.13.0", labeled_ids={"outdoor", "kitchen", "extra"})
     assert u.taxonomy_version == "v1"
 
+TAX_HIER = Taxonomy("v1", "jev-1.13.0",
+    [ClassDef("outdoor", "Outdoor", "Gear used outside", "Indoor items"),
+     ClassDef("boots", "Hiking boots", "Footwear for hiking", "Other shoes", parent="outdoor")],
+    [], Thresholds())
+
+def test_confident_level1_class_pulls_in_its_children():
+    jev = FakeJev(nouls={"outdoor": 0.95, "boots": 0.92})
+    u = understand("hiking boots", TAX_HIER, jev)
+    assert ("boots", 0.92) in u.classes
+
+def test_unconfident_level1_class_asks_no_child_question():
+    asked = []
+    class Spy(FakeJev):
+        def ask(self, state, questions):
+            asked.extend(questions); return super().ask(state, questions)
+    understand("hiking boots", TAX_HIER, Spy(nouls={"outdoor": 0.1}))
+    assert "boots" not in asked
+
 def test_long_query_is_truncated_before_it_enters_the_state():
     seen = []
     class Spy(FakeJev):

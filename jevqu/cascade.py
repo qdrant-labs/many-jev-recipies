@@ -36,8 +36,8 @@ class Cascade:
 
 def error_independence(gold: list[set], local: list[set], jevl: list[set]) -> dict:
     n = len(gold)
-    jev_wrong = [j != g for g, j in zip(gold, jevl)]
-    local_wrong = [l != g for g, l in zip(gold, local)]
-    both = sum(1 for a, b in zip(jev_wrong, local_wrong) if a and b)
+    jev_wrong = [j != g for g, j in zip(gold, jevl, strict=True)]
+    local_wrong = [l != g for g, l in zip(gold, local, strict=True)]
+    both = sum(1 for a, b in zip(jev_wrong, local_wrong, strict=True) if a and b)
     lw = sum(local_wrong)
     return {"p_jev_wrong": sum(jev_wrong) / n, "p_jev_wrong_given_local_wrong": (both / lw) if lw else 0.0, "n": n}
