@@ -28,13 +28,26 @@ def test_retrieval_value_positive_when_filter_helps():
     d, lo, hi = retrieval_value("a", [0, 1], ["q", "q"], rel, run_fn)
     assert d > 0 and lo > 0
 
+def test_retrieval_value_ignores_queries_without_relevant_items():
+    def run_fn(q, cid):
+        return [1, 2] if cid == "a" else [2, 1]
+    assert retrieval_value("a", [0, 1], ["q", "q"], [{1}, set()], run_fn) == retrieval_value("a", [0], ["q"], [{1}], run_fn)
+
 def test_select_rejects_out_of_band_duplicate_facet_and_negative_value():
     cands = [ClassDef("a", "A", "d", "e"), ClassDef("rare", "Rare", "d", "e"),
              ClassDef("nike", "Nike", "d", "e"), ClassDef("bad", "Bad", "d", "e")]
     cov = {"a": [0.9, 0.9, 0.1, 0.1], "rare": [0.9, 0.0, 0.0, 0.0], "nike": [0.9, 0.9, 0.1, 0.1], "bad": [0.9, 0.9, 0.1, 0.1]}
     dem = {"a": [0, 1], "rare": [0, 1], "nike": [0, 1], "bad": [0, 1]}
     values = {"a": (0.05, 0.01, 0.09), "rare": (0.2, 0.1, 0.3), "nike": (0.2, 0.1, 0.3), "bad": (-0.02, -0.05, 0.01)}
-    kept = select(cands, cov, dem, values, facets=[Facet("brand", ["Nike"])], band=(0.3, 0.9))
+    kept = select(cands, cov, dem, values, facets=[Facet("brand", ["Nike"])], n_queries=2, band=(0.3, 0.9))
+    assert [c.id for c in kept] == ["a"]
+
+def test_select_demand_is_a_share_of_all_queries():
+    cands = [ClassDef("a", "A", "d", "e"), ClassDef("b", "B", "d", "e")]
+    cov = {"a": [0.9, 0.1], "b": [0.9, 0.1]}
+    dem = {"a": list(range(40)), "b": [0]}
+    values = {"a": (0.1, 0.05, 0.2), "b": (0.1, 0.05, 0.2)}
+    kept = select(cands, cov, dem, values, facets=[], band=(0.0, 1.0), min_demand=0.02, n_queries=1000)
     assert [c.id for c in kept] == ["a"]
 
 def test_induce_stops_at_max_classes_and_reports():

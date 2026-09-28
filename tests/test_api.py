@@ -1,9 +1,9 @@
 import numpy as np
 import pytest
 from qdrant_client import QdrantClient, models
-from jevqu.api import create_query_understanding, query_points, set_query_understanding, understand_query, upload_points
+from jevqu.api import _sample, create_query_understanding, query_points, set_query_understanding, understand_query, upload_points
 from jevqu.jev import FakeJev
-from jevqu.schema import ClassDef, Taxonomy, Thresholds
+from jevqu.schema import ClassDef, Facet, Taxonomy, Thresholds
 
 class TermJev(FakeJev):
     """Yes (0.9) when a word of the class name, between backticks in the question, appears in the state text."""
@@ -40,6 +40,52 @@ def test_end_to_end_with_fake_jev():
     assert u.taxonomy_version == tax.version
     hits = query_points(c, "p", "trail boots", jev, dense=[1.0, 0.0], understanding="auto", limit=2)
     assert sorted(h.id for h in hits) == [0, 1]
+
+def test_sample_is_a_reproducible_random_sample_not_the_lowest_ids():
+    c = QdrantClient(":memory:")
+    c.create_collection("p", vectors_config=models.VectorParams(size=2, distance=models.Distance.DOT))
+    c.upsert("p", [models.PointStruct(id=i, vector=[1.0, 0.0], payload={}) for i in range(100)])
+    ids1 = {p.id for p in _sample(c, "p", 10)}
+    ids2 = {p.id for p in _sample(c, "p", 10)}
+    assert ids1 == ids2
+    assert ids1 != set(range(10))
+
+def test_set_query_understanding_indexes_facet_fields():
+    c = _client()
+    tax = Taxonomy("v1", "jev-1.13.0", [ClassDef("boots", "Boots", "d", "e")], [Facet("brand", ["Nike"])], Thresholds())
+    calls = []
+    real = c.create_payload_index
+    c.create_payload_index = lambda collection, field_name, *a, **k: (calls.append(field_name), real(collection, field_name, *a, **k))[1]
+    set_query_understanding(c, "p", tax)
+    assert "brand" in calls
+
+def test_upload_points_only_labels_the_newly_uploaded_points():
+    c = _client()
+    tax = Taxonomy("v1", "jev-1.13.0", [ClassDef("boots", "Boots", "d", "e")], [], Thresholds())
+    set_query_understanding(c, "p", tax)
+    stale = models.PointStruct(id=0, vector=[1.0, 0.0], payload={"text": "old unlabeled point"})
+    c.upsert("p", [stale])
+    calls = []
+    class Spy(FakeJev):
+        def ask(self, state, questions):
+            calls.append(state); return super().ask(state, questions)
+    new = models.PointStruct(id=1, vector=[1.0, 0.0], payload={"text": "trail boots"})
+    upload_points(c, "p", [new], Spy(nouls={"boots": 0.9}))
+    assert calls == [{"text": "trail boots"}]
+
+def test_create_query_understanding_validates_arguments():
+    c = _client()
+    c.upsert("p", [models.PointStruct(id=0, vector=[1.0, 0.0], payload={"text": "boots"})])
+    c.create_collection("empty", vectors_config=models.VectorParams(size=2, distance=models.Distance.DOT))
+    embed = lambda texts: np.array([[1.0, 0.0] for _ in texts])
+    with pytest.raises(ValueError):
+        create_query_understanding(c, "p", FakeJev(), queries=[], relevant=[], embed=embed)
+    with pytest.raises(ValueError):
+        create_query_understanding(c, "p", FakeJev(), queries=["q"], relevant=[], embed=embed)
+    with pytest.raises(ValueError):
+        create_query_understanding(c, "p", FakeJev(), queries=["q"], relevant=[{0}], embed=None, run_fn=None)
+    with pytest.raises(ValueError):
+        create_query_understanding(c, "empty", FakeJev(), queries=["q"], relevant=[{0}], embed=embed)
 
 def test_labels_from_another_model_or_taxonomy_are_refused():
     c = _client()

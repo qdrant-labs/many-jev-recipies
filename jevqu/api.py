@@ -1,5 +1,6 @@
 from __future__ import annotations
 import datetime as dt
+import random
 import numpy as np
 from qdrant_client import models
 from jevqu.classify import label_collection
@@ -10,20 +11,35 @@ from jevqu.store import load_taxonomy, save_taxonomy
 from jevqu.text import state_from_payload
 from jevqu.understand import understand
 
-def _sample(client, collection: str, n: int):
-    pts, _ = client.scroll(collection, limit=n, with_payload=True, with_vectors=True)
-    return pts
+def _sample(client, collection: str, n: int, seed: int = 0):
+    ids, offset = [], None
+    while True:  # ids only, no payload: cheap even at 55k points
+        pts, offset = client.scroll(collection, limit=10_000, offset=offset, with_payload=False, with_vectors=False)
+        ids += [p.id for p in pts]
+        if offset is None:
+            break
+    pick = random.Random(seed).sample(ids, min(n, len(ids)))
+    return client.retrieve(collection, ids=pick, with_payload=True, with_vectors=True)
 
 def create_query_understanding(client, collection: str, jev, sample: int = 2000, queries=None, relevant=None,
                                facets: list[Facet] | None = None, embed=None, run_fn=None, **gates) -> tuple[Taxonomy, list[dict]]:
+    queries, relevant, facets = queries or [], relevant or [], facets or []
+    if not queries:
+        raise ValueError("queries must not be empty")
+    if len(relevant) != len(queries):
+        raise ValueError("relevant must have one entry per query")
+    if run_fn is None and embed is None:
+        raise ValueError("either run_fn or embed must be given")
     pts = _sample(client, collection, sample)
+    if not pts:
+        raise ValueError(f"sample of {collection} is empty")
     texts = [" ".join(str(v) for v in p.payload.values() if isinstance(v, str)) for p in pts]
     vectors = embed(texts) if embed else np.array([p.vector if isinstance(p.vector, list) else p.vector["dense"] for p in pts])
     states = [state_from_payload(p.payload) for p in pts]
-    queries, relevant, facets = queries or [], relevant or [], facets or []
     label_fn = None
     if run_fn is None:
         ids, members = [p.id for p in pts], {}
+        relevant = [r & set(ids) for r in relevant]  # the default gate searches only the sample
         using = None if isinstance(pts[0].vector, list) else "dense"
         def label_fn(cid: str, idx: list[int]) -> None:
             members[cid] = [ids[i] for i in idx]
@@ -40,13 +56,17 @@ def create_query_understanding(client, collection: str, jev, sample: int = 2000,
 
 def set_query_understanding(client, collection: str, tax: Taxonomy) -> None:
     save_taxonomy(client, collection, tax)
-    if "classes" not in (client.get_collection(collection).payload_schema or {}):
+    schema = client.get_collection(collection).payload_schema or {}
+    if "classes" not in schema:
         client.create_payload_index(collection, "classes", models.PayloadSchemaType.KEYWORD)
+    for f in tax.facets:  # facet matches become hard filters
+        if f.field not in schema:
+            client.create_payload_index(collection, f.field, models.PayloadSchemaType.KEYWORD)
 
 def upload_points(client, collection: str, points, jev) -> list:
     client.upsert(collection, points)
     tax = load_taxonomy(client, collection)
-    return label_collection(client, collection, tax, jev) if tax else []
+    return label_collection(client, collection, tax, jev, ids=[p.id for p in points]) if tax else []
 
 def _stored_labels(client, collection: str) -> tuple[str | None, set[str] | None]:
     # ponytail: checks one labeled point; scan all if collections ever mix label sets
