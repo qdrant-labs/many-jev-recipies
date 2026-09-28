@@ -30,10 +30,13 @@ def main():
                  models.SparseVector(indices=s.indices.tolist(), values=s.values.tolist()), u, tax, limit=20, mode=mode)]
                 for d, s, u in zip(dv, sv, us)]
     off = ranked("off", Thresholds())
-    rows = recall_loss_curve({"off": off}, relevant, [0.5, 0.6, 0.7, 0.8, 0.9, 0.95, 0.99],
-                             lambda t: ranked("auto", Thresholds(filter_above=t)))
     base = sum(ndcg_at_k(r, rel, 10) for r, rel in zip(off, relevant)) / len(off)
-    md = report_markdown(rows, base)
+    sections = []
+    for s in (0.01, 0.05, 0.2):
+        rows = recall_loss_curve({"off": off}, relevant, [0.5, 0.6, 0.7, 0.8, 0.9, 0.95, 0.99],
+                                 lambda t, s=s: ranked("auto", Thresholds(filter_above=t, boost_scale=s)))
+        sections.append(f"## boost_scale = {s}\n\n{report_markdown(rows, base)}")
+    md = "\n\n".join(sections)
     from pathlib import Path; Path(a.out).parent.mkdir(exist_ok=True, parents=True); Path(a.out).write_text(md)
     print(md); print(json.dumps({"queries": len(queries), "classes": len(tax.classes)}))
 
