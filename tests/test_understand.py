@@ -34,3 +34,17 @@ def test_facet_choice_none_is_dropped_and_confident_pick_kept():
 def test_model_mismatch_refused():
     with pytest.raises(ValueError):
         understand("x", TAX, FakeJev(), stored_model="jev-1.12")
+
+def test_labels_from_an_older_taxonomy_refused():
+    with pytest.raises(ValueError):
+        understand("x", TAX, FakeJev(), stored_model="jev-1.13.0", labeled_ids={"outdoor"})
+    u = understand("x", TAX, FakeJev(), stored_model="jev-1.13.0", labeled_ids={"outdoor", "kitchen", "extra"})
+    assert u.taxonomy_version == "v1"
+
+def test_long_query_is_truncated_before_it_enters_the_state():
+    seen = []
+    class Spy(FakeJev):
+        def ask(self, state, questions):
+            seen.append(state); return super().ask(state, questions)
+    understand("x" * 5000, TAX, Spy())
+    assert len(seen[0]["query"]) == 1500

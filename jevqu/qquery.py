@@ -5,9 +5,11 @@ from jevqu.schema import Taxonomy, Understanding
 def _sure(u: Understanding, tax: Taxonomy) -> list[str]:
     return [cid for cid, p in u.classes if p >= tax.thresholds.filter_above]
 
-def _unsure(u: Understanding, tax: Taxonomy) -> list[tuple[str, float]]:
+def _boosts(u: Understanding, tax: Taxonomy, mode: str) -> list[tuple[str, str, float]]:
     t = tax.thresholds
-    return [(cid, p) for cid, p in u.classes if t.boost_above <= p < t.filter_above]
+    ceiling = t.filter_above if mode == "auto" else float("inf")
+    cands = [("classes", cid, p) for cid, p in u.classes] + [(f, v, p) for f, (v, p) in u.facets.items()]
+    return [(key, v, p) for key, v, p in cands if t.boost_above <= p < ceiling]
 
 def build_filter(u: Understanding | None, tax: Taxonomy, mode: str) -> models.Filter | None:
     if u is None or mode in ("off", "boost"):
@@ -20,11 +22,11 @@ def build_filter(u: Understanding | None, tax: Taxonomy, mode: str) -> models.Fi
 def build_formula(u: Understanding | None, tax: Taxonomy, mode: str) -> models.FormulaQuery | None:
     if u is None or mode in ("off", "filter"):
         return None
-    boosts = _unsure(u, tax) if mode == "auto" else [(c, p) for c, p in u.classes if p >= tax.thresholds.boost_above]
+    boosts = _boosts(u, tax, mode)
     if not boosts:
         return None
     terms = [models.MultExpression(mult=[tax.thresholds.boost_scale * p,
-             models.FieldCondition(key="classes", match=models.MatchValue(value=cid))]) for cid, p in boosts]
+             models.FieldCondition(key=key, match=models.MatchValue(value=v))]) for key, v, p in boosts]
     return models.FormulaQuery(formula=models.SumExpression(sum=["$score", *terms]))
 
 def _search(client, collection, dense, sparse, flt, formula, limit, prefetch_limit):

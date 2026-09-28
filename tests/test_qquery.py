@@ -42,3 +42,29 @@ def test_filtered_query_with_too_few_hits_falls_back_and_merges():
     u = Understanding([("outdoor", 0.95)], {}, "v1")
     ids = [p.id for p in run(c, "p", [1.0, 0.0], None, u, TAX, limit=3, mode="auto")]
     assert ids[0] == 2 and sorted(ids) == [1, 2, 3]
+
+def test_mid_confidence_facet_boosts_instead_of_vanishing():
+    u = Understanding([], {"brand": ("Salomon", 0.7)}, "v1")
+    assert build_filter(u, TAX, "auto") is None
+    fq = build_formula(u, TAX, "auto")
+    assert fq is not None and "Salomon" in str(fq)
+
+def _hybrid():
+    c = QdrantClient(":memory:")
+    c.create_collection("h", vectors_config={"dense": models.VectorParams(size=2, distance=models.Distance.DOT)},
+                        sparse_vectors_config={"sparse": models.SparseVectorParams()})
+    c.upsert("h", [models.PointStruct(id=i, vector={"dense": d, "sparse": models.SparseVector(indices=[0], values=[s])},
+                                      payload={"classes": cl}) for i, d, s, cl in [
+        (1, [1.0, 0.0], 1.0, ["kitchen"]), (2, [0.9, 0.1], 0.9, ["outdoor"]), (3, [0.8, 0.2], 0.8, ["kitchen"])]])
+    return c
+
+def test_hybrid_no_signal_matches_off_and_boost_and_fallback_work():
+    c, sp = _hybrid(), models.SparseVector(indices=[0], values=[1.0])
+    off = run(c, "h", [1.0, 0.0], sp, None, TAX, limit=3, mode="off")
+    quiet = run(c, "h", [1.0, 0.0], sp, Understanding([("outdoor", 0.2)], {}, "v1"), TAX, limit=3, mode="auto")
+    assert [p.id for p in off] == [1, 2, 3]
+    assert [(p.id, p.score) for p in quiet] == [(p.id, p.score) for p in off]
+    boosted = run(c, "h", [1.0, 0.0], sp, Understanding([("outdoor", 0.7)], {}, "v1"), TAX, limit=3, mode="auto")
+    assert boosted[0].id == 2
+    filled = run(c, "h", [1.0, 0.0], sp, Understanding([("outdoor", 0.95)], {}, "v1"), TAX, limit=3, mode="auto")
+    assert filled[0].id == 2 and sorted(p.id for p in filled) == [1, 2, 3]
