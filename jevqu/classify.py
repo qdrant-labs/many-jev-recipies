@@ -1,4 +1,6 @@
 from __future__ import annotations
+import concurrent.futures
+import urllib.error
 from qdrant_client import models
 from jevqu.jev import noul
 from jevqu.schema import ClassDef, Taxonomy
@@ -27,21 +29,29 @@ def classify_point(payload: dict, tax: Taxonomy, jev) -> dict:
     classes = [cid for cid, p in probs.items() if p >= tax.thresholds.label_above]
     return {"classes": classes, "class_probs": probs, "class_model": tax.model, "needs_review": False}
 
-def label_collection(client, collection: str, tax: Taxonomy, jev, batch: int = 64) -> list:
+def label_collection(client, collection: str, tax: Taxonomy, jev, batch: int = 64, ids=None, workers: int = 8) -> list:
+    scroll_filter = models.Filter(must=[models.HasIdCondition(has_id=list(ids))]) if ids is not None else None
     failed, offset = [], None
     while True:
-        pts, offset = client.scroll(collection, limit=batch, offset=offset, with_payload=True, with_vectors=False)
-        for p in pts:
-            # Skip if already labeled by same model with same taxonomy level-1 classes
-            level1_ids = {c.id for c in tax.level1()}
-            if (p.payload.get("class_model") == tax.model and
-                "classes" in p.payload and
-                level1_ids <= set(p.payload.get("class_probs") or {})):
-                continue
-            try:
-                labels = classify_point(p.payload, tax, jev)
-            except Exception:  # ponytail: report and continue; a retry pass is `label_collection` again
-                failed.append(p.id); continue
-            client.set_payload(collection, payload=labels, points=[p.id])
+        pts, offset = client.scroll(collection, limit=batch, offset=offset, with_payload=True, with_vectors=False,
+                                    scroll_filter=scroll_filter)
+        # Skip points already labeled by same model with same taxonomy level-1 classes
+        level1_ids = {c.id for c in tax.level1()}
+        todo = [p for p in pts if not (
+            p.payload.get("class_model") == tax.model and
+            "classes" in p.payload and
+            level1_ids <= set(p.payload.get("class_probs") or {}))]
+        with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as ex:
+            futures = [ex.submit(classify_point, p.payload, tax, jev) for p in todo]
+            for p, fut in zip(todo, futures):
+                try:
+                    labels = fut.result()
+                except urllib.error.HTTPError as e:
+                    if e.code in (401, 403):  # auth is broken for every point; stop instead of failing them all
+                        raise
+                    failed.append(p.id); continue
+                except Exception:  # ponytail: report and continue; a retry pass is `label_collection` again
+                    failed.append(p.id); continue
+                client.set_payload(collection, payload=labels, points=[p.id])
         if offset is None:
             return failed

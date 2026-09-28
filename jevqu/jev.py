@@ -1,5 +1,5 @@
 from __future__ import annotations
-import hashlib, json, os, time, urllib.error, urllib.request
+import hashlib, json, os, tempfile, time, urllib.error, urllib.request
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -64,7 +64,10 @@ class Jev:
                 if attempt == 3:
                     raise
                 time.sleep(delay); delay *= 2
-        path.write_text(json.dumps(answers))
+        with tempfile.NamedTemporaryFile("w", dir=self.cache_dir, delete=False, suffix=".tmp") as tmp:
+            tmp.write(json.dumps(answers))
+            tmp_path = tmp.name
+        os.replace(tmp_path, path)
         return answers
 
 @dataclass

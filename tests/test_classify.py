@@ -1,7 +1,8 @@
+import urllib.error
 import pytest
 from qdrant_client import QdrantClient, models
 from jevqu.classify import classify_point, label_collection
-from jevqu.jev import FakeJev
+from jevqu.jev import API_URL, FakeJev
 from jevqu.schema import ClassDef, Facet, Taxonomy, Thresholds
 
 TAX = Taxonomy("v1", "jev-1.13.0",
@@ -59,6 +60,14 @@ def test_label_collection_skips_points_already_labeled_by_same_model():
             calls.append(state); return super().ask(state, questions)
     label_collection(c, "p", TAX, Spy())
     assert calls == []
+
+def test_label_collection_reraises_on_auth_error():
+    c = _mem()
+    class Unauthorized(FakeJev):
+        def ask(self, state, questions):
+            raise urllib.error.HTTPError(API_URL, 401, "unauthorized", {}, None)
+    with pytest.raises(urllib.error.HTTPError):
+        label_collection(c, "p", TAX, Unauthorized())
 
 def test_label_collection_relabels_points_labeled_under_another_taxonomy():
     c = _mem()
