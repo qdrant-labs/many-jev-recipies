@@ -1,0 +1,15 @@
+[project]
+name = "jevqu"
+version = "0.1.0"
+requires-python = ">=3.11"
+dependencies = [
+  "qdrant-client>=1.14",
+  "fastembed>=0.7",
+  "numpy>=1.26",
+  "scikit-learn>=1.5",
+]
+[project.optional-dependencies]
+eval = ["stark-qa>=0.1.4"]
+dev = ["pytest>=8"]
+[tool.pytest.ini_options]
+testpaths = ["tests"]
