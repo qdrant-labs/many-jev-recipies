@@ -1,4 +1,5 @@
 import json
+import urllib.error
 from pathlib import Path
 from jevqu.jev import FakeJev, Jev, choice, noul
 
@@ -33,3 +34,30 @@ def test_too_many_questions_rejected():
     import pytest
     with pytest.raises(ValueError):
         j.ask("s", {f"q{i}": noul("q", "t", "f") for i in range(201)})
+
+def test_jev_fails_fast_on_401(tmp_path, monkeypatch):
+    import pytest
+    calls = []
+    def fake_post(self, body):
+        calls.append(body)
+        raise urllib.error.HTTPError("https://api.typesafe.ai/v1/systemone", 401, "unauthorized", {}, None)
+    monkeypatch.setattr(Jev, "_post", fake_post)
+    monkeypatch.setattr("jevqu.jev.time.sleep", lambda x: None)
+    j = Jev(api_key="k", cache_dir=tmp_path)
+    with pytest.raises(urllib.error.HTTPError):
+        j.ask("s", {"x": noul("q", "t", "f")})
+    assert len(calls) == 1
+
+def test_jev_retries_on_500(tmp_path, monkeypatch):
+    calls = []
+    def fake_post(self, body):
+        calls.append(body)
+        if len(calls) < 4:
+            raise urllib.error.HTTPError("https://api.typesafe.ai/v1/systemone", 500, "server error", {}, None)
+        return {"model": "jev-1.13.0", "answers": {"x": {"type": "noul", "noul": 0.42}}}
+    monkeypatch.setattr(Jev, "_post", fake_post)
+    monkeypatch.setattr("jevqu.jev.time.sleep", lambda x: None)
+    j = Jev(api_key="k", cache_dir=tmp_path)
+    a = j.ask("s", {"x": noul("q", "t", "f")})
+    assert a == {"x": {"type": "noul", "noul": 0.42}}
+    assert len(calls) == 4

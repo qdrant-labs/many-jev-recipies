@@ -1,5 +1,5 @@
 from __future__ import annotations
-import hashlib, json, os, time, urllib.request
+import hashlib, json, os, time, urllib.error, urllib.request
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -53,7 +53,14 @@ class Jev:
             try:
                 answers = self._post(body)["answers"]
                 break
-            except Exception:  # ponytail: uniform backoff; split 429 vs 5xx if rate limits bite
+            except urllib.error.HTTPError as e:
+                # Fail fast on non-retryable 4xx errors (not 429 rate limit)
+                if 400 <= e.code < 500 and e.code != 429:
+                    raise
+                if attempt == 3:
+                    raise
+                time.sleep(delay); delay *= 2
+            except Exception:  # ponytail: retry on 429, 5xx, network/timeout errors; fail fast on other 4xx
                 if attempt == 3:
                     raise
                 time.sleep(delay); delay *= 2
