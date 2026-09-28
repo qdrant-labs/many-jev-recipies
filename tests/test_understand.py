@@ -1,0 +1,36 @@
+import pytest
+from jevqu.jev import FakeJev
+from jevqu.schema import ClassDef, Facet, Taxonomy, Thresholds
+from jevqu.understand import local_facets, understand
+
+TAX = Taxonomy("v1", "jev-1.13.0",
+    [ClassDef("outdoor", "Outdoor", "Gear used outside", "Indoor items"),
+     ClassDef("kitchen", "Kitchen", "Cooking items", "Non-cooking items")],
+    [Facet("brand", ["Salomon", "Nike"]), Facet("color", ["red", "blue"])], Thresholds())
+
+def test_local_facets_exact_match_case_insensitive():
+    assert local_facets("salomon red boots", TAX) == {"brand": ("Salomon", 1.0), "color": ("red", 1.0)}
+
+def test_understand_combines_local_facets_and_jev_classes():
+    jev = FakeJev(nouls={"outdoor": 0.93, "kitchen": 0.02}, choices={"facet_color": "none"})
+    u = understand("salomon hiking boots", TAX, jev)
+    assert u.classes == [("outdoor", 0.93), ("kitchen", 0.02)]
+    assert u.facets == {"brand": ("Salomon", 1.0)}
+    assert u.taxonomy_version == "v1"
+
+def test_facet_choice_only_asked_when_not_matched_locally():
+    asked = []
+    class Spy(FakeJev):
+        def ask(self, state, questions):
+            asked.extend(questions); return super().ask(state, questions)
+    understand("nike", TAX, Spy())
+    assert "facet_brand" not in asked and "facet_color" in asked
+
+def test_facet_choice_none_is_dropped_and_confident_pick_kept():
+    jev = FakeJev(choices={"facet_brand": "Nike", "facet_color": "none"})
+    u = understand("running shoes", TAX, jev)
+    assert u.facets == {"brand": ("Nike", 0.9)}
+
+def test_model_mismatch_refused():
+    with pytest.raises(ValueError):
+        understand("x", TAX, FakeJev(), stored_model="jev-1.12")
