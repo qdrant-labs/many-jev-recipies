@@ -6,7 +6,7 @@ from typing import Any
 from jevqu import JEV_MODEL
 
 MAX_QUESTIONS = 200
-API_URL = "https://api.typesafe.ai/v1/systemone"
+API_URL = "https://openrouter.ai/api/v1/systemone"  # TypeSafe-compatible System One endpoint
 
 def noul(instructions: str, true: str, false: str) -> dict:
     return {"type": "noul", "instructions": instructions, "criteria": {"true": true, "false": false}}
@@ -26,11 +26,12 @@ class Jev:
     cache_dir: Path = Path(".jev_cache")
     model: str = JEV_MODEL
     timeout: float = 30.0
+    usage: list = field(default_factory=list, repr=False)  # USD per uncached request, from the response
 
     def __post_init__(self) -> None:
-        self.api_key = self.api_key or os.environ.get("TYPESAFE_API_KEY")
+        self.api_key = self.api_key or os.environ.get("OPENROUTER_API_KEY")
         if not self.api_key:
-            raise RuntimeError("TYPESAFE_API_KEY not set")
+            raise RuntimeError("OPENROUTER_API_KEY not set")
         self.cache_dir = Path(self.cache_dir)
         self.cache_dir.mkdir(parents=True, exist_ok=True)
 
@@ -51,7 +52,9 @@ class Jev:
         delay = 0.5
         for attempt in range(4):
             try:
-                answers = self._post(body)["answers"]
+                resp = self._post(body)
+                answers = resp["answers"]
+                self.usage.append(float((resp.get("usage") or {}).get("cost") or 0.0))
                 break
             except urllib.error.HTTPError as e:
                 # Fail fast on non-retryable 4xx errors (not 429 rate limit)

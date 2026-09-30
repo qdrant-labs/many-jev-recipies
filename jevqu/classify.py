@@ -1,7 +1,6 @@
 from __future__ import annotations
 import concurrent.futures
 import urllib.error
-from qdrant_client import models
 from jevqu.jev import noul
 from jevqu.schema import ClassDef, Taxonomy
 from jevqu.text import state_from_payload
@@ -29,14 +28,24 @@ def classify_point(payload: dict, tax: Taxonomy, jev) -> dict:
     classes = [cid for cid, p in probs.items() if p >= tax.thresholds.label_above]
     return {"classes": classes, "class_probs": probs, "class_model": tax.model, "needs_review": False}
 
-def label_collection(client, collection: str, tax: Taxonomy, jev, batch: int = 64, ids=None, workers: int = 8) -> list:
-    scroll_filter = models.Filter(must=[models.HasIdCondition(has_id=list(ids))]) if ids is not None else None
-    failed, offset = [], None
+def _pages(client, collection: str, batch: int, ids):
+    if ids is not None:  # fetch given ids in chunks; an id filter on every scroll page is quadratic
+        ids = list(ids)
+        for i in range(0, len(ids), batch):
+            yield client.retrieve(collection, ids=ids[i:i + batch], with_payload=True, with_vectors=False)
+        return
+    offset = None
     while True:
-        pts, offset = client.scroll(collection, limit=batch, offset=offset, with_payload=True, with_vectors=False,
-                                    scroll_filter=scroll_filter)
+        pts, offset = client.scroll(collection, limit=batch, offset=offset, with_payload=True, with_vectors=False)
+        yield pts
+        if offset is None:
+            return
+
+def label_collection(client, collection: str, tax: Taxonomy, jev, batch: int = 64, ids=None, workers: int = 8) -> list:
+    failed = []
+    level1_ids = {c.id for c in tax.level1()}
+    for pts in _pages(client, collection, batch, ids):
         # Skip points already labeled by same model with same taxonomy level-1 classes
-        level1_ids = {c.id for c in tax.level1()}
         todo = [p for p in pts if not (
             p.payload.get("class_model") == tax.model and
             "classes" in p.payload and
@@ -53,5 +62,4 @@ def label_collection(client, collection: str, tax: Taxonomy, jev, batch: int = 6
                 except Exception:  # ponytail: report and continue; a retry pass is `label_collection` again
                     failed.append(p.id); continue
                 client.set_payload(collection, payload=labels, points=[p.id])
-        if offset is None:
-            return failed
+    return failed

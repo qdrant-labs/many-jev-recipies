@@ -20,13 +20,14 @@ def test_real_client_uses_cache_without_network(tmp_path, monkeypatch):
     calls = []
     def fake_post(self, body):
         calls.append(body)
-        return {"model": "jev-1.13.0", "answers": {"x": {"type": "noul", "noul": 0.42}}}
+        return {"model": "typesafe/jev-1.13-20260917", "answers": {"x": {"type": "noul", "noul": 0.42}},
+                "usage": {"input_tokens": 12, "output_tokens": 3, "cost": 1.9e-05}}
     monkeypatch.setattr(Jev, "_post", fake_post)
     j = Jev(api_key="k", cache_dir=tmp_path)
     a1 = j.ask("s", {"x": noul("q", "t", "f")})
     a2 = j.ask("s", {"x": noul("q", "t", "f")})
     assert a1 == a2 == {"x": {"type": "noul", "noul": 0.42}}
-    assert len(calls) == 1 and calls[0]["model"] == "jev-1.13.0"
+    assert len(calls) == 1 and calls[0]["model"] == "typesafe/jev-1.13" and j.usage == [1.9e-05]
     assert len(list(tmp_path.glob("*.json"))) == 1
 
 def test_too_many_questions_rejected():

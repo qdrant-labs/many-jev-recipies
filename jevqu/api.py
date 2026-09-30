@@ -63,10 +63,10 @@ def set_query_understanding(client, collection: str, tax: Taxonomy) -> None:
         if f.field not in schema:
             client.create_payload_index(collection, f.field, models.PayloadSchemaType.KEYWORD)
 
-def upload_points(client, collection: str, points, jev) -> list:
+def upload_points(client, collection: str, points, jev, workers: int = 8) -> list:
     client.upsert(collection, points)
     tax = load_taxonomy(client, collection)
-    return label_collection(client, collection, tax, jev, ids=[p.id for p in points]) if tax else []
+    return label_collection(client, collection, tax, jev, ids=[p.id for p in points], workers=workers) if tax else []
 
 def _stored_labels(client, collection: str) -> tuple[str | None, set[str] | None]:
     # ponytail: checks one labeled point; scan all if collections ever mix label sets
