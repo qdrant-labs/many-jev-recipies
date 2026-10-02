@@ -1,3 +1,4 @@
+import dataclasses
 import pytest
 from qdrant_client import QdrantClient, models
 from jevqu.qquery import build_filter, build_formula, run
@@ -75,3 +76,14 @@ def test_hybrid_no_signal_matches_off_and_boost_and_fallback_work():
     assert boosted[0].id == 2
     filled = run(c, "h", [1.0, 0.0], sp, Understanding([("outdoor", 0.95)], {}, "v1"), TAX, limit=3, mode="auto")
     assert filled[0].id == 2 and sorted(p.id for p in filled) == [1, 2, 3]
+
+def test_plain_and_boosted_search_take_the_same_query_path():
+    # RRF ties break differently on different paths, so "off" and "auto" must share one; seen on real data, not on toys
+    c, sp = _hybrid(), models.SparseVector(indices=[0], values=[1.0])
+    calls = []
+    real = c.query_points
+    c.query_points = lambda *a, **k: (calls.append(k), real(*a, **k))[1]
+    run(c, "h", [1.0, 0.0], sp, None, TAX, limit=3, mode="off")
+    run(c, "h", [1.0, 0.0], sp, Understanding([("outdoor", 0.7)], {}, "v1"), TAX, limit=3, mode="auto")
+    shapes = [(type(k["query"]).__name__, [type(p.query).__name__ for p in k["prefetch"]]) for k in calls]
+    assert shapes == [("FormulaQuery", ["FusionQuery"])] * 2

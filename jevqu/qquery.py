@@ -43,12 +43,10 @@ def _search(client, collection, dense, sparse, flt, formula, limit, prefetch_lim
         legs.append(models.Prefetch(query=sparse, using="sparse", filter=flt, limit=prefetch_limit))
     fused = models.Prefetch(prefetch=legs, query=models.FusionQuery(fusion=models.Fusion.RRF), limit=prefetch_limit) \
         if len(legs) > 1 else legs[0]
-    if formula is None:
-        if len(legs) == 1:
-            return client.query_points(collection, query=dense, query_filter=flt, limit=limit).points
-        return client.query_points(collection, prefetch=legs, query=models.FusionQuery(fusion=models.Fusion.RRF),
-                                   limit=limit).points
-    return client.query_points(collection, prefetch=[fused], query=formula, limit=limit).points
+    # boosted or not, one path: RRF has many exact ties, and two paths break them differently (measured 0.25-0.9 nDCG
+    # points), which biases every comparison of a boost against plain search
+    return client.query_points(collection, prefetch=[fused], query=formula or models.FormulaQuery(formula="$score"),
+                               limit=limit).points
 
 def run(client, collection: str, dense, sparse, u: Understanding | None, tax: Taxonomy,
         limit: int = 10, mode: str = "auto", prefetch_limit: int = 100) -> list[models.ScoredPoint]:

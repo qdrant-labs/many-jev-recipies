@@ -20,7 +20,7 @@ class Thresholds:
     filter_above: float = 0.9
     boost_above: float = 0.6
     label_above: float = 0.5
-    boost_scale: float = 0.01
+    boost_scale: float = 0.1  # added to fused RRF scores (rank 1 ~0.83, rank 10 ~0.14); picked on C4 dev queries, retune per collection
 
 @dataclass
 class Taxonomy:
