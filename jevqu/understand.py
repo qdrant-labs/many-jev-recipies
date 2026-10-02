@@ -24,7 +24,8 @@ def understand(query: str, tax: Taxonomy, jev, stored_model: str | None = None, 
         if not level1_ids <= labeled_ids:
             raise ValueError(f"stored labels predate taxonomy {tax.version}; relabel first")
     facets = local_facets(query, tax)
-    qs = {c.id: _class_q(c) for c in tax.level1()}
+    # parents and children in one request (one round trip); children are only kept under a confident parent below
+    qs = {c.id: _class_q(c) for c in tax.classes}
     for f in tax.facets:
         if f.field not in facets:
             opts = {v: None for v in f.values[:250]}
@@ -32,12 +33,10 @@ def understand(query: str, tax: Taxonomy, jev, stored_model: str | None = None, 
             qs[f"facet_{f.field}"] = choice(f"Which `{f.field}` does the query constrain on, if any?", opts)
     state = state_from_payload({"query": query})
     ans = jev.ask(state, qs)
-    classes = [(c.id, ans[c.id]["noul"]) for c in tax.level1()]
-    kids = {k.id: _class_q(k) for c in tax.level1() if ans[c.id]["noul"] >= tax.thresholds.boost_above
-            for k in tax.children(c.id)}
-    if kids:
-        kid_ans = jev.ask(state, kids)
-        classes += [(kid_id, kid_ans[kid_id]["noul"]) for kid_id in kids]
+    p = {c.id: ans[c.id]["noul"] for c in tax.classes}
+    # items get a child label only inside the parent (classify_point), so a child is usable only where the query is
+    # in the parent too; otherwise its filter drops targets that never got the child label
+    classes = [(c.id, p[c.id]) for c in tax.classes if c.parent is None or p[c.parent] >= tax.thresholds.boost_above]
     for f in tax.facets:
         a = ans.get(f"facet_{f.field}")
         if a and a["choice"] != "none" and a["confidence"] >= tax.thresholds.boost_above:

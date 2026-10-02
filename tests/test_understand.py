@@ -46,18 +46,19 @@ TAX_HIER = Taxonomy("v1", "jev-1.13.0",
      ClassDef("boots", "Hiking boots", "Footwear for hiking", "Other shoes", parent="outdoor")],
     [], Thresholds())
 
-def test_confident_level1_class_pulls_in_its_children():
-    jev = FakeJev(nouls={"outdoor": 0.95, "boots": 0.92})
-    u = understand("hiking boots", TAX_HIER, jev)
-    assert ("boots", 0.92) in u.classes
-
-def test_unconfident_level1_class_asks_no_child_question():
+def test_children_are_asked_with_their_parents_in_one_request():
     asked = []
     class Spy(FakeJev):
         def ask(self, state, questions):
-            asked.extend(questions); return super().ask(state, questions)
-    understand("hiking boots", TAX_HIER, Spy(nouls={"outdoor": 0.1}))
-    assert "boots" not in asked
+            asked.append(sorted(questions)); return super().ask(state, questions)
+    u = understand("hiking boots", TAX_HIER, Spy(nouls={"outdoor": 0.7, "boots": 0.92}))
+    assert asked == [["boots", "outdoor"]]  # one request for both levels
+    assert u.classes == [("outdoor", 0.7), ("boots", 0.92)]
+
+def test_a_child_is_dropped_when_the_query_is_not_in_its_parent():
+    # items carry a child label only inside the parent, so a child filter here would drop the target
+    u = understand("hiking boots", TAX_HIER, FakeJev(nouls={"outdoor": 0.4, "boots": 0.95}))
+    assert u.classes == [("outdoor", 0.4)]
 
 def test_long_query_is_truncated_before_it_enters_the_state():
     seen = []
