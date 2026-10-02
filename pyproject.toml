@@ -12,5 +12,13 @@ dependencies = [
 eval = ["stark-qa>=0.1.4"]
 dev = ["pytest>=8"]
 notebook = ["ipykernel>=6", "nbconvert>=7", "matplotlib>=3.8"]
+chunk = [
+    "backoff>=2.2.1",
+    "chonkie[semantic]>=1.7.0",
+    "chunking-evaluation",
+]
 [tool.pytest.ini_options]
-testpaths = ["tests"]
+testpaths = ["tests", "recipes"]
+
+[tool.uv.sources]
+chunking-evaluation = { git = "https://github.com/brandonstarxel/chunking_evaluation.git", rev = "e708410d1c61cb76a85cd9d433630ef89b9c6b85" }
