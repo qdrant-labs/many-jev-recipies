@@ -11,6 +11,9 @@ class TermJev(FakeJev):
         text = " ".join(str(v) for v in state.values()).lower()
         out = {}
         for qid, q in questions.items():
+            if q["type"] == "choice":  # class naming: take the encoder's top option
+                out[qid] = {"type": "choice", "choice": next(iter(q["criteria"])), "confidence": 0.9}
+                continue
             name = q["instructions"].split("`")[1].lower().split() if "`" in q["instructions"] else []
             out[qid] = {"type": "noul", "noul": 0.9 if any(w in text for w in name) else 0.1}
         return out
@@ -28,18 +31,28 @@ def test_end_to_end_with_fake_jev():
          ([0.0, 1.0], "frying pan steel"), ([0.1, 0.9], "steel pan nonstick")])]
     c.upsert("p", pts)
     jev = TermJev()
-    embed = lambda texts: np.array([[1.0, 0.0] if "boot" in t or "trail" in t else [0.0, 1.0] for t in texts])
-    tax, report = create_query_understanding(c, "p", jev, sample=4, queries=["waterproof hiking footwear"],
-                                             relevant=[{0, 1}], embed=embed, k=2, band=(0.0, 1.0), min_demand=0.0)
-    assert len(tax.classes) == 1 and "boots" in tax.classes[0].id and report
+    embed = lambda texts: np.array([[("boot" in t) + ("trail" in t), ("pan" in t) + ("steel" in t)] for t in texts], dtype=float)
+    tax, report = create_query_understanding(c, "p", jev, sample=4, embed=embed, k=2, band=(0.0, 1.0))
+    assert len(tax.classes) == 2 and any("boots" in x.id for x in tax.classes) and len(report) == 2
     set_query_understanding(c, "p", tax)
     assert upload_points(c, "p", pts, jev) == []
     labeled = {p.id: p.payload for p in c.scroll("p", limit=10, with_payload=True)[0]}
-    assert sorted(i for i, p in labeled.items() if p["classes"]) == [0, 1]
+    assert all(p["classes"] for p in labeled.values())
     u = understand_query(c, "p", "trail boots", jev)
     assert u.taxonomy_version == tax.version
     hits = query_points(c, "p", "trail boots", jev, dense=[1.0, 0.0], understanding="auto", limit=2)
     assert sorted(h.id for h in hits) == [0, 1]
+
+def test_create_query_understanding_takes_no_queries_and_judges_groups_on_request():
+    c = _client()
+    c.upsert("p", [models.PointStruct(id=i, vector=[1.0, 0.0], payload={"text": t})
+                   for i, t in enumerate(["boots trail", "boots trail", "pan steel", "pan steel"])])
+    embed = lambda texts: np.array([[1.0, 0.0] if "boot" in t else [0.0, 1.0] for t in texts])
+    with pytest.raises(TypeError):
+        create_query_understanding(c, "p", TermJev(), queries=["q"], embed=embed)
+    tax, report = create_query_understanding(c, "p", TermJev(), sample=4, embed=embed, k=2, band=(0.0, 1.0),
+                                             judge_groups=True)
+    assert tax.classes == [] and {r["rejected_by"] for r in report} == {"judge"}  # TermJev says 0.1 to judge questions
 
 def test_sample_is_a_reproducible_random_sample_not_the_lowest_ids():
     c = QdrantClient(":memory:")
@@ -73,19 +86,10 @@ def test_upload_points_only_labels_the_newly_uploaded_points():
     upload_points(c, "p", [new], Spy(nouls={"boots": 0.9}))
     assert calls == [{"text": "trail boots"}]
 
-def test_create_query_understanding_validates_arguments():
+def test_create_query_understanding_refuses_an_empty_collection():
     c = _client()
-    c.upsert("p", [models.PointStruct(id=0, vector=[1.0, 0.0], payload={"text": "boots"})])
-    c.create_collection("empty", vectors_config=models.VectorParams(size=2, distance=models.Distance.DOT))
-    embed = lambda texts: np.array([[1.0, 0.0] for _ in texts])
     with pytest.raises(ValueError):
-        create_query_understanding(c, "p", FakeJev(), queries=[], relevant=[], embed=embed)
-    with pytest.raises(ValueError):
-        create_query_understanding(c, "p", FakeJev(), queries=["q"], relevant=[], embed=embed)
-    with pytest.raises(ValueError):
-        create_query_understanding(c, "p", FakeJev(), queries=["q"], relevant=[{0}], embed=None, run_fn=None)
-    with pytest.raises(ValueError):
-        create_query_understanding(c, "empty", FakeJev(), queries=["q"], relevant=[{0}], embed=embed)
+        create_query_understanding(c, "p", FakeJev(), embed=lambda texts: np.array([[1.0, 0.0] for _ in texts]))
 
 def test_labels_from_another_model_or_taxonomy_are_refused():
     c = _client()

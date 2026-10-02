@@ -4,7 +4,7 @@ import random
 import numpy as np
 from qdrant_client import models
 from jevqu.classify import label_collection
-from jevqu.induce import induce
+from jevqu.induce import induce, induce_llm
 from jevqu.qquery import run
 from jevqu.schema import Facet, Taxonomy, Thresholds, Understanding
 from jevqu.store import load_taxonomy, save_taxonomy
@@ -21,37 +21,24 @@ def _sample(client, collection: str, n: int, seed: int = 0):
     pick = random.Random(seed).sample(ids, min(n, len(ids)))
     return client.retrieve(collection, ids=pick, with_payload=True, with_vectors=True)
 
-def create_query_understanding(client, collection: str, jev, sample: int = 2000, queries=None, relevant=None,
-                               facets: list[Facet] | None = None, embed=None, run_fn=None, **gates) -> tuple[Taxonomy, list[dict]]:
-    queries, relevant, facets = queries or [], relevant or [], facets or []
-    if not queries:
-        raise ValueError("queries must not be empty")
-    if len(relevant) != len(queries):
-        raise ValueError("relevant must have one entry per query")
-    if run_fn is None and embed is None:
-        raise ValueError("either run_fn or embed must be given")
+def create_query_understanding(client, collection: str, jev, sample: int = 2000, facets: list[Facet] | None = None,
+                               embed=None, judge_groups: bool = False, encoder=None, llm=None, **gates) -> tuple[Taxonomy, list[dict]]:
+    """Induce a taxonomy from the collection alone (no queries): see jevqu.induce.induce.
+    encoder ranks candidate class names; defaults to embed, then to bge-small. With llm (jevqu.llm.LLM), the LLM writes
+    the class names, definitions and parents instead, and Jev validates them (jevqu.induce.induce_llm)."""
     pts = _sample(client, collection, sample)
     if not pts:
         raise ValueError(f"sample of {collection} is empty")
-    texts = [" ".join(str(v) for v in p.payload.values() if isinstance(v, str)) for p in pts]
-    vectors = embed(texts) if embed else np.array([p.vector if isinstance(p.vector, list) else p.vector["dense"] for p in pts])
     states = [state_from_payload(p.payload) for p in pts]
-    label_fn = None
-    if run_fn is None:
-        ids, members = [p.id for p in pts], {}
-        relevant = [r & set(ids) for r in relevant]  # the default gate searches only the sample
-        using = None if isinstance(pts[0].vector, list) else "dense"
-        def label_fn(cid: str, idx: list[int]) -> None:
-            members[cid] = [ids[i] for i in idx]
-        def run_fn(q: str, cid: str | None):  # value gate inside the sample: all sampled points vs the candidate's members
-            if embed is None:
-                return []
-            flt = models.Filter(must=[models.HasIdCondition(has_id=members[cid] if cid else ids)])
-            return [h.id for h in client.query_points(collection, query=embed([q])[0].tolist(), using=using,
-                                                      query_filter=flt, limit=10).points]
-    classes, report = induce(texts, vectors, states, queries, relevant, run_fn, jev, facets, label_fn=label_fn, **gates)
+    texts = [" ".join(str(v) for v in st.values() if isinstance(v, str)) for st in states]
+    vectors = embed(texts) if embed else np.array([p.vector if isinstance(p.vector, list) else p.vector["dense"] for p in pts])
+    if llm is not None:  # the LLM writes the classes, Jev validates them (Jev chooses, it cannot write)
+        classes, report = induce_llm(texts, vectors, states, jev, llm, facets or [], judge_groups=judge_groups, **gates)
+    else:
+        classes, report = induce(texts, vectors, states, jev, facets or [], judge_groups=judge_groups,
+                                 encoder=encoder or embed, **gates)
     tax = Taxonomy(version=dt.datetime.now(dt.UTC).strftime("v%Y%m%d%H%M%S"), model=jev.model, classes=classes,
-                   facets=facets, thresholds=Thresholds())
+                   facets=facets or [], thresholds=Thresholds())
     return tax, report
 
 def set_query_understanding(client, collection: str, tax: Taxonomy) -> None:
