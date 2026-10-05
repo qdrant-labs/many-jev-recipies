@@ -14,7 +14,7 @@ The recipes share the Jev client (`jevqu/jev.py`) and nothing else, so you can t
 
 ```bash
 uv sync --extra dev                       # core + tests
-uv sync --extra chunk                     # chunker baselines (chonkie, chunking-evaluation)
+uv sync --extra chunk                     # chunker baselines and QASPER loader (chonkie, pyarrow)
 uv sync --extra eval --extra notebook     # STaRK evaluation, notebooks
 export OPENROUTER_API_KEY=...             # the code reads the environment, not .env
 ```
@@ -72,7 +72,7 @@ starts = cut(probs, sizes=[b - a for a, b in spans], threshold=0.5, min_size=200
 pieces = chunks(text, spans, starts)                    # exact slices of `text`
 ```
 
-Measured on five corpora from Chroma's chunking-evaluation, at matched mean chunk size: recall +0.05 to +0.08 over fixed, recursive and chonkie baselines, with precision never lower. See `recipes/chunker/chunker.ipynb`.
+Measured on the QASPER test split (407 papers, 1,297 questions written by researchers, with the answer paragraphs marked by other researchers), retrieving 5 chunks per question from Qdrant at matched mean chunk size: against fixed-size, recursive and chonkie semantic chunking, recall +0.03 to +0.06, precision 8 to 14% higher and IoU 8 to 18% higher, every 95% interval above zero. The smallest gain is against a recursive splitter that breaks on paragraph boundaries. See `recipes/chunker/chunker.ipynb`.
 
 Both results are one dataset family each, so treat them as evidence, not a guarantee.
 
@@ -85,6 +85,7 @@ Both results are one dataset family each, so treat them as evidence, not a guara
 | `jevqu/induce.py`, `classify.py`, `cascade.py` | taxonomy induction, point labeling, local classifier cascade |
 | `jevqu/understand.py`, `qquery.py` | query to classes/facets; filter/boost search |
 | `recipes/wands.py` | shared WANDS loader and hybrid index used by the recipe notebooks |
+| `recipes/chunker/qasper.py` | QASPER loader and character-overlap scores for the chunker benchmark |
 | `docs/` | design notes and implementation plan |
 
 ## Tests
