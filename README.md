@@ -59,6 +59,8 @@ ids, backfilled = prune(ids, rel, dup, rel_min=0.5, dup_max=0.5, keep=10)
 
 Measured on WANDS (240 held-out queries): sorting the hybrid top 20 by Jev's relevance gives nDCG@10 +0.086 over hybrid and cuts irrelevant results in the top 10 from 102 to 38. It beats MiniLM-L-6 by +0.022 and bge-reranker-base by +0.039, but it is not faster than local cross-encoders. The notebook (`recipes/prune/prune.ipynb`) also covers variety (MMR with Jev relevance as the relevance term) and sweeps the thresholds.
 
+Measured on NFCorpus (100 test queries, BGE-small top 50, nDCG@10 lift over BGE-small): Jev Score +0.074, Jev Choice +0.067, and Jev Iterative Choice +0.079, against +0.026 for ms-marco-MiniLM-L-6-v2 and -0.013 for bge-reranker-base. Iterative Choice sends one request per ranking position and took about five times as long as Score. See `notebooks/jev_reranking_nfcorpus.ipynb`, a Colab notebook; the cross-encoder rows come from a separate CPU run of the same code, as the notebook explains.
+
 ## Semantic chunker
 
 Jev reads windows of numbered sentences and judges, per gap, whether the next sentence starts a new topic. Cutting is a pure function of those probabilities, so one set of requests serves every threshold and size bound.
